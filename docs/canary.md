@@ -15,6 +15,8 @@ from both Synara Stable and the HMR development process.
 - Updates: only through the Canary scripts; the production updater is disabled
 
 Canary starts with an empty data directory. It never copies or shares Stable data.
+It defaults to `https://synara-account-api-trial.synara-orgs.workers.dev` for account
+sign-in. Operators can override that service with `SYNARA_ACCOUNT_URL`.
 
 ## Install and update
 

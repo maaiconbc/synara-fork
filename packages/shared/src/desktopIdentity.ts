@@ -163,6 +163,7 @@ export function synaraDesktopIdentity(flavor: SynaraDesktopFlavor): SynaraDeskto
       entryUrl: SYNARA_CANARY_DESKTOP_ENTRY_URL,
       userDataDirectoryName: "synara-canary",
       defaultHomeDirectoryName: ".synara-canary",
+      defaultAccountUrl: "https://synara-account-api-trial.synara-orgs.workers.dev",
       usesScriptedUpdates: true,
     };
   }
