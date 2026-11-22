@@ -26,6 +26,8 @@ export interface PullRequestContextDraft {
   id: string;
   createdAt: string;
   scope: PullRequestContextScope;
+  /** Present only for an individually selected review comment. */
+  commentId?: string;
   /** Absent means a pull request, so drafts and transcripts written earlier still parse. */
   itemKind?: PullRequestContextItemKind;
   /** The item's number and URL (named for pull requests, which came first). */
@@ -104,6 +106,9 @@ export function normalizePullRequestContext(
     id,
     createdAt: draft.createdAt,
     scope: draft.scope,
+    ...(draft.scope === "comments" && draft.commentId?.trim()
+      ? { commentId: draft.commentId.trim() }
+      : {}),
     ...(draft.itemKind === "issue" ? { itemKind: "issue" as const } : {}),
     prNumber: draft.prNumber,
     prUrl: draft.prUrl.trim(),
@@ -130,13 +135,16 @@ export function normalizePullRequestContexts(
 }
 
 /**
- * Cards for the same PR + scope replace each other: clicking "Failing checks" twice must
- * not stack two identical bubbles, but a fresher snapshot should win over a stale one.
+ * Cards for the same PR + scope + selected comment replace each other. Repeated selections
+ * refresh the snapshot; distinct comments and the bulk review keep separate cards.
  */
 export function pullRequestContextDedupKey(
-  context: Pick<PullRequestContextDraft, "scope" | "prNumber" | "prUrl">,
+  context: Pick<PullRequestContextDraft, "scope" | "prNumber" | "prUrl" | "commentId">,
 ): string {
-  return `${context.scope}\u0000${context.prNumber}\u0000${context.prUrl}`;
+  const key = `${context.scope}\u0000${context.prNumber}\u0000${context.prUrl}`;
+  return context.scope === "comments" && context.commentId
+    ? `${key}\u0000${context.commentId}`
+    : key;
 }
 
 export function pullRequestContextItemLabel(

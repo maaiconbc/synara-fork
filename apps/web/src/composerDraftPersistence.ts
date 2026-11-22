@@ -163,6 +163,7 @@ const PersistedPullRequestContextDraft = Schema.Struct({
   id: Schema.String,
   createdAt: Schema.String,
   scope: Schema.Literals(PULL_REQUEST_CONTEXT_SCOPES),
+  commentId: Schema.optionalKey(Schema.String),
   // Issue cards only; pull request cards omit it, as drafts saved before issues did.
   itemKind: Schema.optionalKey(Schema.Literal("issue")),
   prNumber: Schema.Number,
@@ -626,6 +627,11 @@ function normalizePersistedPullRequestContextDraft(
     id,
     createdAt: typeof candidate.createdAt === "string" ? candidate.createdAt : "",
     scope: candidate.scope,
+    ...(candidate.scope === "comments" &&
+    typeof candidate.commentId === "string" &&
+    candidate.commentId.trim()
+      ? { commentId: candidate.commentId.trim() }
+      : {}),
     ...(candidate.itemKind === "issue" ? { itemKind: "issue" as const } : {}),
     prNumber,
     prUrl: typeof candidate.prUrl === "string" ? candidate.prUrl : "",
@@ -642,6 +648,7 @@ function toPersistedPullRequestContext(
     id: context.id,
     createdAt: context.createdAt,
     scope: context.scope,
+    ...(context.commentId ? { commentId: context.commentId } : {}),
     ...(context.itemKind === "issue" ? { itemKind: "issue" as const } : {}),
     prNumber: context.prNumber,
     prUrl: context.prUrl,

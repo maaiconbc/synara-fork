@@ -578,6 +578,7 @@ export function buildPullRequestContextCard(input: {
   checks: ReadonlyArray<GitPullRequestCheck>;
   comments: ReadonlyArray<GitPullRequestComment>;
   commentsTruncated: boolean;
+  commentId?: string;
 }): PullRequestContextDraft | null {
   const { scope, pr, checks, comments, commentsTruncated } = input;
   const repairs = summarizePullRequestRepairs({ checks, comments, mergeability: pr.mergeability });
@@ -598,18 +599,21 @@ export function buildPullRequestContextCard(input: {
       const paths = [
         ...new Set(comments.flatMap((comment) => (comment.path ? [comment.path] : []))),
       ];
-      return createPullRequestContextDraft({
-        scope,
-        pr,
-        title: `${repairs.comments}${commentsTruncated ? "+" : ""} review ${pluralize(repairs.comments, "comment")}`,
-        subtitle: paths.length > 0 ? joinCardList(paths) : prLabel,
-        text: buildFixReviewCommentsPrompt({
-          prNumber: pr.number,
-          prUrl: pr.url,
-          comments,
-          commentsTruncated,
+      return {
+        ...createPullRequestContextDraft({
+          scope,
+          pr,
+          title: `${repairs.comments}${commentsTruncated ? "+" : ""} review ${pluralize(repairs.comments, "comment")}`,
+          subtitle: paths.length > 0 ? joinCardList(paths) : prLabel,
+          text: buildFixReviewCommentsPrompt({
+            prNumber: pr.number,
+            prUrl: pr.url,
+            comments,
+            commentsTruncated,
+          }),
         }),
-      });
+        ...(input.commentId ? { commentId: input.commentId } : {}),
+      };
     }
     case "checks": {
       const failing = failingPullRequestChecks(checks);

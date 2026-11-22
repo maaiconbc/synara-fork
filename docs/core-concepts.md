@@ -348,6 +348,19 @@ When due, the thread returns to recent activity and Synara shows a reminder usin
 your notification settings. If Synara and its server are closed, the overdue
 reminder is recovered when they start again.
 
+The Environment panel shows unresolved review comments for the current PR and the chat's
+other linked PRs, including automated Codex reviews. Additional lists are labeled by PR
+number. The current list shares the **Pull Request → Comments** snapshot; open PRs refresh
+every minute while Environment is open, even with the PR menu closed. Merged and closed
+PRs also load their comments, without periodic polling. Loading failures and bounded-preview
+notices remain visible. Clicking a comment opens its full Markdown body in a compact Synara
+dialog, including comments without a GitHub URL, and keeps Environment open.
+The dialog's **Send for correction** button attaches only the selected comment to the current
+chat's composer, with its owning PR and file context. It preserves the unsent message and
+uses the existing review-repair context card; different selected comments keep separate cards,
+while selecting the same comment again refreshes its card. Bulk review cards remain separate.
+The user sends the cards with the normal Send action.
+
 In Stable and Beta, **Auto-fix CI** in the Environment panel's pull request menu watches open PRs
 for this chat, including other PRs in its stack. One chat can own the active watch for a
 PR. A paused watch releases ownership; resuming it requires that no other chat owns it.
@@ -466,6 +479,12 @@ Synara supplies the shared workspace around it:
 
 Each task owns a provider session. Available models and controls can differ because Synara discovers
 capabilities from the installed runtime and account.
+
+The right side of the chat's top bar shows each selected provider account's icon beside the
+percentage **remaining** in its 5-hour window. These indicators no longer occupy the app rail.
+Hover for all limits and reset details; click to open Settings → Usage. When the 5-hour
+window is missing or unavailable, the indicator shows “—” rather than a weekly percentage.
+The account selection stays in Usage settings; the old rail window selection is ignored.
 
 Provider quota warnings live under **Environment → Usage**, on the active account's row. Approaching
 limits update that row and mark the Environment toggle. Editor and embedded chats keep the composer

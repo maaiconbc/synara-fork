@@ -287,7 +287,6 @@ import {
   SidebarCustomizeList,
 } from "./SidebarCustomizeList";
 import { AppRailMoreMenu } from "./AppRailMoreMenu";
-import { AppRailUsage } from "./AppRailUsage";
 import { ProjectDisclosureChevron, ProjectSidebarIcon } from "./ProjectSidebarIcon";
 import { ThreadHoverCardContent } from "./ThreadHoverCardContent";
 import { ProjectHoverCardContent } from "./ProjectHoverCardContent";
@@ -8227,11 +8226,6 @@ export default function Sidebar() {
     bottomItems: [],
     bottomSlot: (
       <>
-        <AppRailUsage
-          onOpenUsageSettings={() => {
-            void navigate({ to: "/settings", search: { section: "usage", computer: "local" } });
-          }}
-        />
         <SidebarHelpMenu inRail {...sidebarHelpMenuProps} />
         {showDesktopUpdateButton && desktopUpdateState ? (
           <DesktopUpdateRailButton

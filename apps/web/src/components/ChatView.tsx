@@ -6939,6 +6939,9 @@ export default function ChatView({
         )}
       >
         <ChatHeader
+          onOpenUsageSettings={() => {
+            void navigate({ to: "/settings", search: { section: "usage", computer: "local" } });
+          }}
           activeThreadId={activeThread.id}
           activeThreadTitle={activeThreadDisplayTitle}
           activeThreadEntryPoint={terminalState.entryPoint}

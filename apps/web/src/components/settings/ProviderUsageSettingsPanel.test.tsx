@@ -54,7 +54,7 @@ describe("ProviderUsageSettingsPanel", () => {
     try {
       const markup = render([]);
       const switchMarkup = markup.match(
-        /<[^>]+aria-label="Show OpenCode usage at the bottom of the sidebar"[^>]*>/u,
+        /<[^>]+aria-label="Show OpenCode usage in the top bar"[^>]*>/u,
       )?.[0];
       expect(switchMarkup).toBeDefined();
       expect(switchMarkup).not.toMatch(/\sdata-disabled=/u);
@@ -71,9 +71,9 @@ describe("ProviderUsageSettingsPanel", () => {
       const markup = render([
         snapshot({ usageLines: [{ label: "Disabled usage", value: "7 credits" }] }),
       ]);
-      expect(markup).not.toContain("Show Codex usage at the bottom of the sidebar");
+      expect(markup).not.toContain("Show Codex usage in the top bar");
       expect(markup).not.toContain("Disabled usage");
-      expect(markup).toContain("Show Claude usage at the bottom of the sidebar");
+      expect(markup).toContain("Show Claude usage in the top bar");
     } finally {
       appSettings.disabledProviders = [];
     }
@@ -88,8 +88,8 @@ describe("ProviderUsageSettingsPanel", () => {
     ]);
 
     expect(markup).toContain('role="switch"');
-    expect(markup).toContain("Show Codex usage at the bottom of the sidebar");
-    expect(markup).toContain("Show Claude usage at the bottom of the sidebar");
+    expect(markup).toContain("Show Codex usage in the top bar");
+    expect(markup).toContain("Show Claude usage in the top bar");
     expect(markup).toContain("Personal allowance");
   });
 
@@ -226,8 +226,8 @@ describe("ProviderUsageSettingsPanel", () => {
 
     expect(markup).toContain("Work account");
     expect(markup).toContain("Research account");
-    expect(markup).toContain("Show Claude · Default account usage at the bottom of the sidebar");
-    expect(markup).toContain("Show Claude · Research account usage at the bottom of the sidebar");
+    expect(markup).toContain("Show Claude · Default account usage in the top bar");
+    expect(markup).toContain("Show Claude · Research account usage in the top bar");
     expect(markup.indexOf("Work account")).toBeLessThan(markup.indexOf("Research account"));
     expect(markup.match(/Personal allowance/g)).toHaveLength(1);
     expect(markup.match(/Company allowance/g)).toHaveLength(1);

@@ -7,6 +7,7 @@
 //          (draft / ready / close / reopen), Add to chat, and Link / Unlink. Copy link and
 //          Open in GitHub ride on the View PR row. The thread's other linked PRs follow as
 //          compact rows; a thread without any PR offers a single "Link pull request" row.
+//          Review comments also stay visible below the row, sharing the same polling snapshot.
 // Layer: Environment panel section
 // Depends on: git status/PR-snapshot React Query helpers, the pull request action mutation,
 //             and the shared Environment row skin.
@@ -14,6 +15,7 @@
 import type {
   GitPullRequestCheck,
   GitPullRequestComment,
+  GitPullRequestSnapshotResult,
   OrchestrationThreadPullRequest,
   OrchestrationThreadPullRequestLink,
   ProjectId,
@@ -32,7 +34,7 @@ import {
   resolveCurrentPullRequestLink,
   visiblePullRequestLinks,
 } from "@synara/shared/threadPullRequestLinks";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 
 import { ComposerPickerMenuPopup, ComposerPickerMenuSubPopup } from "../ComposerPickerMenuPopup";
@@ -49,6 +51,17 @@ import {
   MenuTrigger,
 } from "../../ui/menu";
 import { Checkbox } from "../../ui/checkbox";
+import { Button } from "../../ui/button";
+import {
+  Dialog,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogPanel,
+  DialogPopup,
+  DialogTitle,
+} from "../../ui/dialog";
+import { PullRequestMarkdown } from "../../pullRequest/PullRequestMarkdown";
 import { toastManager } from "../../ui/toast";
 import { DEFAULT_TOAST_TIMEOUT_MS } from "../../ui/toast.logic";
 import { PullRequestAvatar } from "../../pullRequest/PullRequestAvatar";
@@ -110,6 +123,7 @@ import {
   ENVIRONMENT_ROW_CLASS_NAME,
   ENVIRONMENT_ROW_ICON_CLASS_NAME,
   EnvironmentLabeledSection,
+  EnvironmentSectionLabel,
   EnvironmentRowBody,
   EnvironmentRowChevron,
 } from "./EnvironmentRow";
@@ -126,6 +140,7 @@ import {
   summarizePullRequestRepairs,
   withStableCheckKeys,
   type PullRequestChecksTone,
+  type PullRequestCardSource,
 } from "./environmentPullRequest.logic";
 import { useTranslation } from "~/i18n";
 
@@ -249,19 +264,19 @@ function checksToneIcon(tone: PullRequestChecksTone) {
   }
 }
 
-// Popup row that is clickable only when it has a URL: plain div without one, MenuItem with one.
+// Shared menu/panel data row; rows without an action stay noninteractive.
 function MenuRow({
-  url,
-  onOpenUrl,
+  onClick,
   className,
   children,
+  inMenu = true,
 }: {
-  url: string | null;
-  onOpenUrl: (url: string) => void;
+  inMenu?: boolean;
+  onClick: (() => void) | undefined;
   className: string;
   children: ReactNode;
 }) {
-  if (!url) {
+  if (!onClick) {
     return (
       <div className={cn("w-full cursor-default rounded-[0.5rem] text-left", className)}>
         {children}
@@ -269,9 +284,17 @@ function MenuRow({
     );
   }
 
+  if (!inMenu) {
+    return (
+      <button type="button" onClick={onClick} className={cn(ENVIRONMENT_ROW_CLASS_NAME, className)}>
+        {children}
+      </button>
+    );
+  }
+
   return (
     <MenuItem
-      onClick={() => onOpenUrl(url)}
+      onClick={onClick}
       className={cn(
         "w-full cursor-pointer rounded-[0.5rem] text-left data-highlighted:bg-[var(--color-background-elevated-secondary)]",
         className,
@@ -289,10 +312,10 @@ function ChecksMenuRow({
   check: GitPullRequestCheck;
   onOpenUrl: (url: string) => void;
 }) {
+  const url = check.url;
   return (
     <MenuRow
-      url={check.url}
-      onOpenUrl={onOpenUrl}
+      onClick={url ? () => onOpenUrl(url) : undefined}
       className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 px-2 py-1 text-ui"
     >
       <PullRequestCheckStatusIcon status={check.status} />
@@ -304,12 +327,14 @@ function ChecksMenuRow({
   );
 }
 
-function CommentsMenuRow({
+function PullRequestCommentRow({
   comment,
-  onOpenUrl,
+  onSelect,
+  inMenu,
 }: {
   comment: GitPullRequestComment;
-  onOpenUrl: (url: string) => void;
+  onSelect: (comment: GitPullRequestComment) => void;
+  inMenu: boolean;
 }) {
   const { formatLocale } = useTranslation();
 
@@ -317,8 +342,8 @@ function CommentsMenuRow({
   return (
     // items-stretch overrides the menu-option default items-center for this column layout.
     <MenuRow
-      url={comment.url}
-      onOpenUrl={onOpenUrl}
+      onClick={() => onSelect(comment)}
+      inMenu={inMenu}
       className="flex flex-col items-stretch gap-0.5 px-2 py-1.5"
     >
       <span className="line-clamp-2 text-ui text-[var(--color-text-foreground)]">
@@ -381,6 +406,88 @@ function MenuRowLabel({
   );
 }
 
+function PullRequestCommentList({
+  query,
+  inMenu,
+  onSelect,
+}: {
+  query: UseQueryResult<GitPullRequestSnapshotResult>;
+  inMenu: boolean;
+  onSelect: (comment: GitPullRequestComment) => void;
+}) {
+  const { t } = useTranslation();
+  const comments = query.data?.comments ?? [];
+  const commentsTruncated = query.data?.commentsTruncated ?? false;
+  const commentsError = query.data?.commentsError ?? null;
+  const RetryItem = inMenu ? MenuItem : "button";
+  return query.isLoading ? (
+    <MenuPlaceholder text={t("git:loadingChecksAndComments")} />
+  ) : query.isError ? (
+    <RetryItem
+      onClick={() => void query.refetch()}
+      className={inMenu ? undefined : ENVIRONMENT_ROW_CLASS_NAME}
+    >
+      <MenuRowLabel
+        icon={<RefreshCwIcon className={MENU_ICON_CLASS_NAME} aria-hidden />}
+        label={t("git:retryLoadingComments")}
+      />
+    </RetryItem>
+  ) : commentsError ? (
+    <MenuPlaceholder text={`Couldn't load review comments: ${commentsError}`} />
+  ) : comments.length === 0 ? (
+    <MenuPlaceholder
+      text={
+        commentsTruncated
+          ? "Review comments may be hidden by the bounded preview. Open the PR on GitHub."
+          : "No unresolved review comments."
+      }
+    />
+  ) : (
+    // Keep rows from shrinking when the bounded list overflows.
+    <div className="flex max-h-64 flex-col gap-0.5 overflow-y-auto [&>*]:shrink-0">
+      {comments.map((comment) => (
+        <PullRequestCommentRow
+          key={comment.id}
+          comment={comment}
+          inMenu={inMenu}
+          onSelect={onSelect}
+        />
+      ))}
+      {commentsTruncated ? (
+        <MenuPlaceholder text="More review comments may be available on GitHub." />
+      ) : null}
+    </div>
+  );
+}
+
+function LinkedPullRequestComments({
+  gitCwd,
+  pr,
+  enabled,
+  onSelect,
+}: {
+  gitCwd: string | null;
+  pr: OrchestrationThreadPullRequest;
+  enabled: boolean;
+  onSelect: (comment: GitPullRequestComment, pr: PullRequestCardSource) => void;
+}) {
+  const { t } = useTranslation();
+  const query = useQuery(
+    gitPullRequestSnapshotQueryOptions({ cwd: gitCwd, reference: pr.url, enabled }),
+  );
+  const label = t("git:symbol", { value0: pr.number, value1: t("git:comments") });
+  return (
+    <div role="region" aria-label={label} data-testid={`pr-review-comments-${pr.number}`}>
+      <EnvironmentSectionLabel>{label}</EnvironmentSectionLabel>
+      <PullRequestCommentList
+        query={query}
+        inMenu={false}
+        onSelect={(comment) => onSelect(comment, toThreadPullRequest(pr)!)}
+      />
+    </div>
+  );
+}
+
 export function EnvironmentPullRequestSection({
   gitCwd,
   enabled,
@@ -408,6 +515,11 @@ export function EnvironmentPullRequestSection({
   const openPane = useRightDockStore((store) => store.openPane);
   const queryClient = useQueryClient();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [selectedComment, setSelectedComment] = useState<{
+    comment: GitPullRequestComment;
+    pr: PullRequestCardSource;
+  } | null>(null);
+  const [commentDialogOpen, setCommentDialogOpen] = useState(false);
   const [confirmAction, setConfirmAction] = useState<PullRequestConfirmAction | null>(null);
   // Share the git block's cache, but revalidate stale status when this always-mounted
   // panel opens so an earlier missing PR does not linger until the next polling tick.
@@ -442,7 +554,7 @@ export function EnvironmentPullRequestSection({
     gitPullRequestSnapshotQueryOptions({
       cwd: gitCwd,
       reference: pr?.url ?? null,
-      enabled: enabled && pr !== null && pr.state === "open",
+      enabled: enabled && pr !== null,
     }),
   );
 
@@ -769,6 +881,31 @@ export function EnvironmentPullRequestSection({
         ? t("git:pullRequest_couldNotLoadData")
         : checksSummary.label;
 
+  const openReviewComment = (
+    comment: GitPullRequestComment,
+    pr: PullRequestCardSource = displayPr,
+  ) => {
+    setSelectedComment({ comment, pr });
+    setMenuOpen(false);
+    setCommentDialogOpen(true);
+  };
+
+  const prepareSelectedCommentFix = () => {
+    if (!activeThreadId || !selectedComment) return;
+    const card = buildPullRequestContextCard({
+      scope: "comments",
+      pr: selectedComment.pr,
+      checks: [],
+      comments: [selectedComment.comment],
+      commentId: selectedComment.comment.id,
+      commentsTruncated: false,
+    });
+    if (card && addChatPullRequestContext(activeThreadId, card)) {
+      setCommentDialogOpen(false);
+      onClose();
+    }
+  };
+
   return (
     <EnvironmentLabeledSection
       label={
@@ -910,43 +1047,11 @@ export function EnvironmentPullRequestSection({
                   />
                 </MenuSubTrigger>
                 <ComposerPickerMenuSubPopup side={SUBMENU_SIDE} className="w-80 min-w-80">
-                  {failed ? (
-                    <MenuItem onClick={() => void snapshotQuery.refetch()}>
-                      <MenuRowLabel
-                        icon={<RefreshCwIcon className={MENU_ICON_CLASS_NAME} aria-hidden />}
-                        label={t("git:retryLoadingComments")}
-                      />
-                    </MenuItem>
-                  ) : commentsError ? (
-                    <MenuPlaceholder text={`Couldn't load review comments: ${commentsError}`} />
-                  ) : comments.length === 0 ? (
-                    <MenuPlaceholder
-                      text={
-                        commentsTruncated
-                          ? "Review comments may be hidden by the bounded preview. Open the PR on GitHub."
-                          : "No unresolved review comments."
-                      }
-                    />
-                  ) : (
-                    // shrink-0 children: when the list overflows max-h-64, flex would otherwise
-                    // shrink the rows (their line-clamp overflow-hidden spans have no automatic
-                    // minimum size) and clip the text instead of scrolling.
-                    <div className="flex max-h-64 flex-col gap-0.5 overflow-y-auto [&>*]:shrink-0">
-                      {comments.map((comment) => (
-                        <CommentsMenuRow
-                          key={comment.id}
-                          comment={comment}
-                          onOpenUrl={(url) => {
-                            onOpenUrl(url);
-                            onClose();
-                          }}
-                        />
-                      ))}
-                      {commentsTruncated ? (
-                        <MenuPlaceholder text="More review comments may be available on GitHub." />
-                      ) : null}
-                    </div>
-                  )}
+                  <PullRequestCommentList
+                    query={snapshotQuery}
+                    inMenu
+                    onSelect={openReviewComment}
+                  />
                 </ComposerPickerMenuSubPopup>
               </MenuSub>
 
@@ -1147,6 +1252,11 @@ export function EnvironmentPullRequestSection({
         </ComposerPickerMenuPopup>
       </Menu>
 
+      <div role="region" aria-label={t("git:comments")} data-testid="pr-review-comments">
+        <EnvironmentSectionLabel>{t("git:comments")}</EnvironmentSectionLabel>
+        <PullRequestCommentList query={snapshotQuery} inMenu={false} onSelect={openReviewComment} />
+      </div>
+
       {/* The rest of the stack, like Claude Code's PR list: each open PR gets its own
           Auto-fix CI checkbox. Fixes still run in this chat, one at a time. */}
       {stackRows.map((entry) => {
@@ -1220,7 +1330,53 @@ export function EnvironmentPullRequestSection({
         );
       })}
 
+      {linkedPullRequests
+        .filter((link) => pullRequestLinkKey(link.pullRequest.url) !== displayPrKey)
+        .map((link) => (
+          <LinkedPullRequestComments
+            key={link.pullRequest.url}
+            gitCwd={gitCwd}
+            pr={link.pullRequest}
+            enabled={enabled}
+            onSelect={openReviewComment}
+          />
+        ))}
+
       {linkDialog}
+
+      <Dialog open={commentDialogOpen} onOpenChange={setCommentDialogOpen}>
+        <DialogPopup className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{t("git:comments")}</DialogTitle>
+            {selectedComment ? (
+              <DialogDescription>
+                {[selectedComment.comment.author, selectedComment.comment.path]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </DialogDescription>
+            ) : null}
+          </DialogHeader>
+          <DialogPanel className="max-h-[60vh]">
+            {selectedComment ? (
+              <PullRequestMarkdown
+                text={selectedComment.comment.body}
+                fallback=""
+                cwd={gitCwd ?? ""}
+              />
+            ) : null}
+          </DialogPanel>
+          <DialogFooter>
+            <Button
+              size="sm"
+              disabled={!activeThreadId || !selectedComment}
+              onClick={prepareSelectedCommentFix}
+            >
+              <HammerIcon aria-hidden />
+              {t("git:sendForCorrection")}
+            </Button>
+          </DialogFooter>
+        </DialogPopup>
+      </Dialog>
 
       <PullRequestConfirmActionDialog
         action={confirmAction}

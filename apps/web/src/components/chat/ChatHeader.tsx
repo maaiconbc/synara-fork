@@ -66,6 +66,7 @@ import { cn } from "~/lib/utils";
 import { useOpenFavoriteEditorShortcut } from "~/hooks/useOpenFavoriteEditorShortcut";
 import type { RepoDiffTotals } from "~/hooks/useRepoDiffTotals";
 import { ProviderIcon } from "../ProviderIcon";
+import { TopNavUsage } from "../TopNavUsage";
 import { ProviderUsageMenuControl } from "../ProviderUsageMenuControl";
 import { EnvironmentToggle, type EnvironmentToggleState } from "./environment/EnvironmentToggle";
 import { SurfacePanelToggle, type SurfacePanelToggleState } from "./chatHeaderControls";
@@ -86,6 +87,7 @@ interface ChatHeaderProps {
   activeThreadTitle: string;
   activeThreadEntryPoint: ThreadPrimarySurface;
   activeProvider: ProviderKind;
+  onOpenUsageSettings?: () => void;
   activeProjectName: string | undefined;
   // The project the chat belongs to, shown ahead of the title ("project / chat") when the
   // row has no tabs. Null for chats outside a project (home chats, groups).
@@ -435,6 +437,7 @@ function resolveChatHeaderThreadIconKind(
 }
 
 export function ChatHeader({
+  onOpenUsageSettings,
   activeThreadId,
   activeThreadTitle,
   activeThreadEntryPoint,
@@ -768,7 +771,8 @@ export function ChatHeader({
         )}
       </div>
       <div className="flex shrink-0 items-center gap-2 [-webkit-app-region:no-drag]">
-        {!minimalChrome && !hideHandoffControls && !environment ? (
+        {onOpenUsageSettings ? <TopNavUsage onOpenUsageSettings={onOpenUsageSettings} /> : null}
+        {!minimalChrome && !hideHandoffControls && !environment && !onOpenUsageSettings ? (
           <ProviderUsageMenuControl provider={activeProvider} />
         ) : null}
         {!minimalChrome && !hideHandoffControls && showHandoffAction ? (

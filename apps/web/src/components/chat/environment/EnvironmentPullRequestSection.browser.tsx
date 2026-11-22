@@ -18,7 +18,7 @@ import {
 } from "@synara/contracts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { page } from "vitest/browser";
+import { page, userEvent } from "vitest/browser";
 import { cleanup, render } from "vitest-browser-react";
 
 import { useComposerDraftStore } from "~/composerDraftStore";
@@ -142,7 +142,7 @@ function createQueryClient(commentsOverride?: GitPullRequestSnapshotResult["comm
 function section(
   queryClient: QueryClient,
   onClose = vi.fn(),
-  options: { enabled?: boolean; projectId?: ProjectId } = {},
+  options: { enabled?: boolean; projectId?: ProjectId; onOpenUrl?: (url: string) => void } = {},
 ) {
   return (
     <QueryClientProvider client={queryClient}>
@@ -153,7 +153,7 @@ function section(
         // Link-only tests omit a project; status tests exercise the real mutation.
         projectId={options.projectId ?? null}
         configuredRepositories={[{ nameWithOwner: "example/synara" }]}
-        onOpenUrl={vi.fn()}
+        onOpenUrl={options.onOpenUrl ?? vi.fn()}
         onClose={onClose}
       />
     </QueryClientProvider>
@@ -208,6 +208,7 @@ describe("EnvironmentPullRequestSection", () => {
   });
   afterEach(async () => {
     await cleanup();
+    vi.useRealTimers();
     for (const queryClient of queryClients) {
       queryClient.clear();
     }
@@ -334,14 +335,30 @@ describe("EnvironmentPullRequestSection", () => {
     expect(getGitStatus).toHaveBeenCalledExactlyOnceWith({ cwd });
   });
 
-  it.each(["merged"] as const)(
-    "shows a branch's %s PR on first open without loading active PR details",
+  it.each(["merged", "closed"] as const)(
+    "loads review comments for a branch's %s PR without loading active PR details",
     async (state) => {
       const queryClient = createQueryClient();
       queryClient.setQueryData<GitStatusResult>(gitQueryKeys.status(cwd), (status) =>
         status ? { ...status, pr: { ...pullRequest, state } } : status,
       );
       queryClient.removeQueries({ queryKey: gitQueryKeys.pullRequest(cwd) });
+      getPullRequestSnapshot.mockResolvedValue({
+        pullRequest: { ...pullRequest, state },
+        checks: [],
+        comments: [
+          {
+            id: "merged-review",
+            author: "chatgpt-codex-connector",
+            body: "Review finding on a settled PR.",
+            path: null,
+            url: null,
+            createdAt: null,
+          },
+        ],
+        commentsTruncated: false,
+        commentsError: null,
+      });
       await renderSection(queryClient);
 
       const stateLabel = state === "merged" ? "Merged" : "Closed";
@@ -352,9 +369,18 @@ describe("EnvironmentPullRequestSection", () => {
       await expect
         .element(page.getByText(`${stateLabel} on GitHub`, { exact: true }))
         .not.toBeInTheDocument();
-      expect(queryClient.isFetching()).toBe(0);
+      await expect
+        .element(
+          page
+            .getByTestId("pr-review-comments")
+            .getByText("Review finding on a settled PR.", { exact: true }),
+        )
+        .toBeVisible();
       expect(getSettings).not.toHaveBeenCalled();
-      expect(getPullRequestSnapshot).not.toHaveBeenCalled();
+      expect(getPullRequestSnapshot).toHaveBeenCalledExactlyOnceWith({
+        cwd,
+        reference: pullRequest.url,
+      });
 
       await prRow.click();
       await expect.element(page.getByText("View PR", { exact: true })).toBeVisible();
@@ -451,6 +477,166 @@ describe("EnvironmentPullRequestSection", () => {
     });
   });
 
+  it("shows review comments and polls with the PR menu closed", async () => {
+    const queryClient = createQueryClient();
+    const snapshotKey = gitPullRequestSnapshotQueryOptions({
+      cwd,
+      reference: pullRequest.url,
+    }).queryKey;
+    const snapshot = queryClient.getQueryData<GitPullRequestSnapshotResult>(snapshotKey)!;
+    getGitStatus.mockResolvedValue(queryClient.getQueryData(gitQueryKeys.status(cwd))!);
+    getPullRequestSnapshot.mockResolvedValue({
+      ...snapshot,
+      comments: [{ ...snapshot.comments[0]!, body: "New automated review finding." }],
+    });
+    const view = await renderSection(queryClient);
+    expect(document.querySelector('[data-testid="pr-review-comments"]')).not.toBeNull();
+    const comments = page.getByTestId("pr-review-comments");
+    await expect
+      .element(
+        comments.getByText("Preserve the Environment panel while drafting the fix.", {
+          exact: true,
+        }),
+      )
+      .toBeVisible();
+    await expect.element(page.getByText("View PR", { exact: true })).not.toBeInTheDocument();
+
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    // Re-enable the query so its polling timer is created under the fake clock.
+    await view.rerender(section(queryClient, vi.fn(), { enabled: false }));
+    await view.rerender(section(queryClient));
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    await expect
+      .element(comments.getByText("New automated review finding.", { exact: true }))
+      .toBeVisible();
+    expect(getPullRequestSnapshot).toHaveBeenCalledWith({ cwd, reference: pullRequest.url });
+    await expect.element(page.getByText("View PR", { exact: true })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    { commentsTruncated: false, commentsError: null, message: "No unresolved review comments." },
+    {
+      commentsTruncated: true,
+      commentsError: null,
+      message: "Review comments may be hidden by the bounded preview. Open the PR on GitHub.",
+    },
+    {
+      commentsTruncated: false,
+      commentsError: "GitHub unavailable",
+      message: "Couldn't load review comments: GitHub unavailable",
+    },
+  ])(
+    "shows the review comment notice: $message",
+    async ({ commentsTruncated, commentsError, message }) => {
+      const queryClient = createQueryClient([]);
+      queryClient.setQueryData<GitPullRequestSnapshotResult>(
+        gitPullRequestSnapshotQueryOptions({ cwd, reference: pullRequest.url }).queryKey,
+        (snapshot) => (snapshot ? { ...snapshot, commentsTruncated, commentsError } : snapshot),
+      );
+      await renderSection(queryClient);
+      await expect
+        .element(page.getByTestId("pr-review-comments").getByText(message, { exact: true }))
+        .toBeVisible();
+    },
+  );
+
+  it.each([`${pullRequest.url}#discussion_r1`, null])(
+    "opens the complete comment locally when its URL is %s",
+    async (url) => {
+      const onClose = vi.fn();
+      const onOpenUrl = vi.fn();
+      const body = `**Finding title**\n\n${"Long context. ".repeat(30)}\n\nOnly visible in the full comment.`;
+      await render(
+        section(
+          createQueryClient([
+            {
+              id: "preview",
+              author: "chatgpt-codex-connector",
+              body,
+              path: "src/example.ts",
+              url,
+              createdAt: null,
+            },
+          ]),
+          onClose,
+          { onOpenUrl },
+        ),
+      );
+      await page.getByTestId("pr-review-comments").getByRole("button").first().click();
+      const dialog = page.getByRole("dialog", { name: "Comments", exact: true });
+      await expect
+        .element(dialog.getByText("Only visible in the full comment.", { exact: true }))
+        .toBeVisible();
+      expect(onOpenUrl).not.toHaveBeenCalled();
+      expect(onClose).not.toHaveBeenCalled();
+      await userEvent.keyboard("{Escape}");
+      await expect.element(dialog).not.toBeInTheDocument();
+      await expect.element(page.getByTestId("pr-review-comments")).toBeVisible();
+    },
+  );
+
+  it("prepares only the selected review for correction without sending the existing draft", async () => {
+    const onClose = vi.fn();
+    useComposerDraftStore.getState().setPrompt(threadId, "Keep my draft.");
+    await renderSection(createQueryClient(), onClose);
+    await page.getByTestId("pr-review-comments").getByRole("button").last().click();
+    await page.getByRole("button", { name: "Send for correction", exact: true }).click();
+    expect(draftCards()).toHaveLength(1);
+    expect(draftCards()[0]).toMatchObject({
+      scope: "comments",
+      prNumber: 321,
+      prUrl: pullRequest.url,
+    });
+    expect(draftCards()[0]?.text).toContain("Address the second review finding too.");
+    expect(draftCards()[0]?.text).not.toContain(
+      "Preserve the Environment panel while drafting the fix.",
+    );
+    expect(draftCards()[0]?.text).toContain("untrusted review feedback");
+    expect(useComposerDraftStore.getState().draftsByThreadId[threadId]?.prompt).toBe(
+      "Keep my draft.",
+    );
+    expect(dispatchCommand).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalledOnce();
+    await expect
+      .element(page.getByRole("dialog", { name: "Comments", exact: true }))
+      .not.toBeInTheDocument();
+  });
+
+  it("keeps two selected comments without replacing the bulk review or duplicating a repeated selection", async () => {
+    useComposerDraftStore.getState().setPrompt(threadId, "Keep my draft.");
+    await renderSection(createQueryClient());
+    await openRepairSubmenu();
+    await page.getByRole("menuitem", { name: "Comments 2", exact: true }).click();
+    const bulkText = draftCards()[0]!.text;
+    for (const index of [0, 1, 0]) {
+      await page.getByTestId("pr-review-comments").getByRole("button").nth(index).click();
+      await page.getByRole("button", { name: "Send for correction", exact: true }).click();
+    }
+    expect(draftCards()).toHaveLength(3);
+    expect(draftCards()[0]?.text).toBe(bulkText);
+    expect(
+      draftCards()
+        .slice(1)
+        .map((card) => card.text),
+    ).toEqual([
+      expect.stringContaining("Address the second review finding too."),
+      expect.stringContaining("Preserve the Environment panel while drafting the fix."),
+    ]);
+    expect(useComposerDraftStore.getState().draftsByThreadId[threadId]?.prompt).toBe(
+      "Keep my draft.",
+    );
+  });
+
+  it("keeps a comment dialog open after its PR menu closes", async () => {
+    await renderSection(createQueryClient());
+    await page.getByText("#321 Keep PR context visible", { exact: true }).click();
+    await page.getByRole("menuitem", { name: /Comments/ }).hover();
+    await page.getByRole("menuitem", { name: /Preserve the Environment panel/ }).click();
+    await expect.element(page.getByRole("dialog", { name: "Comments", exact: true })).toBeVisible();
+    await expect.element(page.getByText("View PR", { exact: true })).not.toBeInTheDocument();
+  });
+
   it("lists long comment threads without leaking bot metadata", async () => {
     const comments = Array.from({ length: 6 }, (_, index) => ({
       id: `long-${index}`,
@@ -462,20 +648,27 @@ describe("EnvironmentPullRequestSection", () => {
     }));
     const queryClient = createQueryClient(comments);
     await renderSection(queryClient);
+    const list = document.querySelector('[data-testid="pr-review-comments"] .overflow-y-auto')!;
+    expect(list.scrollHeight).toBeGreaterThan(list.clientHeight);
 
     await page.getByText("#321 Keep PR context visible", { exact: true }).click();
     await expect.element(page.getByText("6 comments", { exact: true })).toBeVisible();
-    await page.getByText("Comments", { exact: true }).hover();
+    await page.getByRole("menuitem", { name: /Comments/ }).hover();
     await expect
-      .poll(() => document.body.textContent?.includes("Finding 0"), { timeout: 5000 })
-      .toBe(true);
+      .poll(
+        () =>
+          document.querySelectorAll(
+            '[data-slot="menu-sub-content"] img[src*="avatars.githubusercontent.com"]',
+          ).length,
+      )
+      .toBe(comments.length);
 
     // Bot metadata markers are display noise and must never reach the popup.
     expect(document.body.textContent).not.toContain("DESCRIPTION START");
 
     // Reviewer avatar renders for each comment row.
     const avatars = document.querySelectorAll('img[src*="avatars.githubusercontent.com"]');
-    expect(avatars.length).toBe(comments.length);
+    expect(avatars.length).toBe(comments.length * 2);
   });
 });
 
@@ -534,6 +727,14 @@ describe("EnvironmentPullRequestSection thread links", () => {
   }
 
   beforeEach(() => {
+    getPullRequestSnapshot.mockReset();
+    getPullRequestSnapshot.mockImplementation(async ({ reference }) => ({
+      pullRequest: reference === earlierPullRequest.url ? earlierPullRequest : pullRequest,
+      checks: [],
+      comments: [],
+      commentsTruncated: false,
+      commentsError: null,
+    }));
     getAutoFix.mockResolvedValue({ states: [] });
     getSettings.mockResolvedValue(DEFAULT_SERVER_SETTINGS_VIEW);
     dispatchCommand.mockResolvedValue({ sequence: 1 });
@@ -543,6 +744,8 @@ describe("EnvironmentPullRequestSection thread links", () => {
     await cleanup();
     for (const queryClient of queryClients) queryClient.clear();
     queryClients.clear();
+    useComposerDraftStore.getState().clearDraftThread(threadId);
+    getPullRequestSnapshot.mockReset();
     dispatchCommand.mockReset();
     runPullRequestAction.mockReset();
     getPullRequestDetail.mockReset();
@@ -666,6 +869,57 @@ describe("EnvironmentPullRequestSection thread links", () => {
         url: sibling.url,
       }),
     );
+  });
+
+  it("shows unresolved comments from another linked merged PR with the menu closed", async () => {
+    seedThreadLinks([
+      { pullRequest: earlierPullRequest, source: "agent", linkedAt: "2026-08-01T10:00:00Z" },
+      { pullRequest, source: "agent", linkedAt: "2026-08-02T10:00:00Z" },
+    ]);
+    getPullRequestSnapshot.mockResolvedValue({
+      pullRequest: earlierPullRequest,
+      checks: [],
+      comments: [
+        {
+          id: "linked-review",
+          author: "chatgpt-codex-connector",
+          body: "Finding from an earlier merged PR.",
+          path: null,
+          url: null,
+          createdAt: null,
+        },
+      ],
+      commentsTruncated: false,
+      commentsError: null,
+    });
+    await renderSection(createLinkedQueryClient());
+    await expect
+      .element(
+        page
+          .getByTestId("pr-review-comments-300")
+          .getByText("Finding from an earlier merged PR.", { exact: true }),
+      )
+      .toBeVisible();
+    expect(getPullRequestSnapshot).toHaveBeenCalledExactlyOnceWith({
+      cwd,
+      reference: earlierPullRequest.url,
+    });
+    await expect.element(page.getByText("View PR", { exact: true })).not.toBeInTheDocument();
+    await page.getByTestId("pr-review-comments-300").getByRole("button").click();
+    await expect
+      .element(
+        page
+          .getByRole("dialog", { name: "Comments", exact: true })
+          .getByText("Finding from an earlier merged PR.", { exact: true }),
+      )
+      .toBeVisible();
+    await page.getByRole("button", { name: "Send for correction", exact: true }).click();
+    expect(draftCards()[0]).toMatchObject({
+      scope: "comments",
+      prNumber: 300,
+      prUrl: earlierPullRequest.url,
+    });
+    expect(draftCards()[0]?.text).toContain("Finding from an earlier merged PR.");
   });
 
   it("offers to link a PR when the thread has none", async () => {

@@ -23,7 +23,7 @@ vi.mock("~/appSettings", () => ({ useAppSettings: () => ({ settings, updateSetti
 
 import { serverQueryKeys } from "~/lib/serverReactQuery";
 
-import { AppRailUsage } from "./AppRailUsage";
+import { TopNavUsage } from "./TopNavUsage";
 import { ProviderUsageSettingsPanel } from "./settings/ProviderUsageSettingsPanel";
 
 async function renderAccounts(
@@ -43,16 +43,16 @@ async function renderAccounts(
         <div className="flex items-start gap-6 p-6">
           <div
             data-testid="usage-rail"
-            className="flex w-12 shrink-0 flex-col items-center gap-1 rounded-lg bg-sidebar py-2"
+            className="flex shrink-0 items-center gap-1 rounded-lg bg-sidebar p-2"
           >
-            <AppRailUsage onOpenUsageSettings={onOpenUsageSettings} />
+            <TopNavUsage onOpenUsageSettings={onOpenUsageSettings} />
           </div>
           <div className="w-[520px] space-y-6">
             <ProviderUsageSettingsPanel />
           </div>
         </div>
       ) : (
-        <AppRailUsage onOpenUsageSettings={onOpenUsageSettings} />
+        <TopNavUsage onOpenUsageSettings={onOpenUsageSettings} />
       )}
     </QueryClientProvider>
   );
@@ -104,7 +104,7 @@ const claudeSnapshots: readonly ServerProviderUsageSnapshot[] = [
   },
 ];
 
-describe("AppRailUsage", () => {
+describe("TopNavUsage", () => {
   beforeEach(() => {
     settings.railUsageWindow = "both";
     settings.disabledProviders = [];
@@ -120,14 +120,14 @@ describe("AppRailUsage", () => {
     expect(settings.railUsageProviders).toEqual(["codex"]);
   });
 
-  it("selects two Claude accounts in Settings and shows each account's ring and hover card", async () => {
+  it("selects two Claude accounts in Settings and shows each account's percentage and hover card", async () => {
     settings.railUsageInstanceIds = [];
     const { rerender } = await renderAccounts(claudeSnapshots, claudeSettings, true);
     const personalSwitch = page.getByRole("switch", {
-      name: "Show Claude · Default account usage at the bottom of the sidebar",
+      name: "Show Claude · Default account usage in the top bar",
     });
     const workSwitch = page.getByRole("switch", {
-      name: "Show Claude · Work usage at the bottom of the sidebar",
+      name: "Show Claude · Work usage in the top bar",
     });
     await personalSwitch.click();
     await rerender();
@@ -141,7 +141,7 @@ describe("AppRailUsage", () => {
     await expect
       .element(
         page.getByRole("switch", {
-          name: "Show Codex usage at the bottom of the sidebar",
+          name: "Show Codex usage in the top bar",
         }),
       )
       .toBeDisabled();
@@ -150,15 +150,8 @@ describe("AppRailUsage", () => {
     const work = page.getByRole("button", { name: /^Claude · Work usage:/ });
     await expect.element(personal).toBeVisible();
     await expect.element(work).toBeVisible();
-    expect(
-      personal
-        .element()
-        .querySelector("circle[stroke-dasharray]")
-        ?.getAttribute("stroke-dasharray"),
-    ).toBe("75 100");
-    expect(
-      work.element().querySelector("circle[stroke-dasharray]")?.getAttribute("stroke-dasharray"),
-    ).toBe("20 100");
+    await expect.element(personal).toHaveTextContent("—");
+    await expect.element(work).toHaveTextContent("—");
     expect(work.element().querySelector('[data-accent="#2563eb"]')).not.toBeNull();
     await userEvent.hover(work);
     await expect.element(page.getByText("Claude · Work", { exact: true }).last()).toBeVisible();
@@ -170,7 +163,7 @@ describe("AppRailUsage", () => {
     await expect
       .element(
         page.getByRole("switch", {
-          name: "Show Codex usage at the bottom of the sidebar",
+          name: "Show Codex usage in the top bar",
         }),
       )
       .toBeEnabled();
@@ -199,7 +192,7 @@ describe("AppRailUsage", () => {
     expect(work.element().querySelector('span[aria-hidden="true"]')).not.toBeNull();
   });
 
-  it("preserves a disabled account selection when another ring is changed", async () => {
+  it("preserves a disabled account selection when another account is changed", async () => {
     settings.railUsageInstanceIds = ["claude_work", "codex"];
     const { client, rerender } = await renderAccounts(
       claudeSnapshots,
@@ -211,30 +204,22 @@ describe("AppRailUsage", () => {
       },
       true,
     );
-    await page
-      .getByRole("switch", { name: "Show Codex usage at the bottom of the sidebar" })
-      .click();
+    await page.getByRole("switch", { name: "Show Codex usage in the top bar" }).click();
     await rerender();
     expect(settings.railUsageInstanceIds).toEqual(["claude_work"]);
-    await page
-      .getByRole("switch", { name: "Show Claude usage at the bottom of the sidebar" })
-      .click();
+    await page.getByRole("switch", { name: "Show Claude usage in the top bar" }).click();
     await rerender();
-    await page
-      .getByRole("switch", { name: "Show Codex usage at the bottom of the sidebar" })
-      .click();
+    await page.getByRole("switch", { name: "Show Codex usage in the top bar" }).click();
     await rerender();
     expect(settings.railUsageInstanceIds).toEqual(["claude_work", "claudeAgent", "codex"]);
     client.setQueryData(serverQueryKeys.settings(), claudeSettings);
     await rerender();
     await expect
-      .element(
-        page.getByRole("switch", { name: "Show Claude · Work usage at the bottom of the sidebar" }),
-      )
+      .element(page.getByRole("switch", { name: "Show Claude · Work usage in the top bar" }))
       .toBeChecked();
     await expect.element(page.getByRole("button", { name: /^Claude · Work usage:/ })).toBeVisible();
     await expect
-      .element(page.getByRole("switch", { name: "Show Codex usage at the bottom of the sidebar" }))
+      .element(page.getByRole("switch", { name: "Show Codex usage in the top bar" }))
       .not.toBeChecked();
     expect(settings.railUsageInstanceIds).toEqual(["claude_work", "claudeAgent", "codex"]);
   });
@@ -253,93 +238,68 @@ describe("AppRailUsage", () => {
       .not.toBeInTheDocument();
   });
 
-  it("shows independent weekly and five-hour rings even when a model sublimit is tighter", async () => {
+  it("shows only five-hour remaining percentage beside the icon, with the full hover details", async () => {
     const onOpenUsageSettings = await renderUsage([
       { window: "seven_day", usedPercent: 57, windowDurationMins: 10_080 },
       { window: "five_hour", usedPercent: 22, windowDurationMins: 300 },
       { window: "seven_day_sonnet", usedPercent: 96, windowDurationMins: 10_080 },
     ]);
-
-    const button = page.getByRole("button", { name: /^Codex usage:/ });
+    const button = page.getByRole("button", {
+      name: "Codex usage: 5h 78% remaining. Open usage settings",
+      exact: true,
+    });
     await expect.element(button).toBeVisible();
-    const fills = button.element().querySelectorAll("circle[stroke-dasharray]");
-    expect(Array.from(fills, (circle) => circle.getAttribute("stroke-dasharray"))).toEqual([
-      "43 100",
-      "78 100",
-    ]);
-    expect(Number(fills[0]?.getAttribute("r"))).toBeGreaterThan(
-      Number(fills[1]?.getAttribute("r")),
-    );
-    // Both rings colour by the same remaining-quota scale: 43% is fair, 78% is healthy.
-    expect(fills[0]?.getAttribute("class")).toContain("stroke-yellow-500");
-    expect(fills[1]?.getAttribute("class")).toContain("stroke-emerald-500");
-
+    await expect.element(button).toHaveTextContent("78%");
+    expect(button.element().querySelectorAll('[role="progressbar"]')).toHaveLength(0);
     await userEvent.hover(button);
-    await expect.element(page.getByText("Weekly · outer")).toBeVisible();
-    await expect.element(page.getByText("5h · inner")).toBeVisible();
     await expect.element(page.getByText("43% left", { exact: true })).toBeVisible();
     await expect.element(page.getByText("78% left", { exact: true })).toBeVisible();
     await button.click();
     expect(onOpenUsageSettings).toHaveBeenCalledOnce();
   });
 
-  it.each([
-    ["fiveHour", "85 100", "stroke-emerald-500"],
-    ["weekly", "8 100", "stroke-red-500"],
-  ])("draws a single ring for the %s setting", async (window, dasharray, strokeClassName) => {
-    settings.railUsageWindow = window;
-    await renderUsage([
-      { window: "Weekly", usedPercent: 92 },
-      { window: "5h", usedPercent: 15 },
-    ]);
-    const button = page.getByRole("button", { name: /^Codex usage:/ });
-    await expect.element(button).toBeVisible();
-    const fills = button.element().querySelectorAll("circle[stroke-dasharray]");
-    expect(fills).toHaveLength(1);
-    expect(fills[0]?.getAttribute("stroke-dasharray")).toBe(dasharray);
-    expect(fills[0]?.getAttribute("class")).toContain(strokeClassName);
+  it.each(["both", "fiveHour", "weekly"])(
+    "uses five-hour usage despite the old %s window setting",
+    async (window) => {
+      settings.railUsageWindow = window;
+      await renderUsage([
+        { window: "Weekly", usedPercent: 92 },
+        { window: "5h", usedPercent: 15 },
+      ]);
+      await expect
+        .element(page.getByRole("button", { name: /^Codex usage:/ }))
+        .toHaveTextContent("85%");
+    },
+  );
+
+  it.each([0, 100])("shows the remainder when %s%% is used", async (usedPercent) => {
+    await renderUsage([{ window: "5h", usedPercent }]);
+    await expect
+      .element(page.getByRole("button", { name: /^Codex usage:/ }))
+      .toHaveTextContent(`${100 - usedPercent}%`);
   });
 
-  it.each(["Weekly", "5h"])("shows only the reported %s ring", async (window) => {
-    await renderUsage([{ window, usedPercent: 35 }]);
-    const button = page.getByRole("button", { name: /^Codex usage:/ });
-    await expect.element(button).toBeVisible();
-    const fills = button.element().querySelectorAll("circle[stroke-dasharray]");
-    expect(fills).toHaveLength(1);
-    expect(fills[0]?.getAttribute("stroke-dasharray")).toBe("65 100");
-  });
+  it.each(["Weekly", "Monthly"])(
+    "shows an unknown five-hour value when only %s is reported",
+    async (window) => {
+      await renderUsage([{ window, usedPercent: 35 }]);
+      const button = page.getByRole("button", {
+        name: "Codex usage: 5h unavailable. Open usage settings",
+        exact: true,
+      });
+      await expect.element(button).toHaveTextContent("—");
+    },
+  );
 
-  it("keeps an empty track for an exhausted window without drawing a remaining arc", async () => {
-    await renderUsage([
-      { window: "Weekly", usedPercent: 0 },
-      { window: "5h", usedPercent: 100 },
-    ]);
-    const button = page.getByRole("button", {
-      name: "Codex usage: 5h 0% remaining, Weekly 100% remaining. Open usage settings",
-    });
-    await expect.element(button).toBeVisible();
-    expect(button.element().querySelectorAll("circle")).toHaveLength(3);
-    const fills = button.element().querySelectorAll("circle[stroke-dasharray]");
-    expect(fills).toHaveLength(1);
-    expect(fills[0]?.getAttribute("stroke-dasharray")).toBe("100 100");
-  });
-
-  it("preserves the single-ring fallback for providers with other limit windows", async () => {
-    await renderUsage([{ window: "Monthly", usedPercent: 60 }]);
-    const button = page.getByRole("button", { name: /^Codex usage:/ });
-    await expect.element(button).toBeVisible();
-    const fills = button.element().querySelectorAll("circle[stroke-dasharray]");
-    expect(fills).toHaveLength(1);
-    expect(fills[0]?.getAttribute("stroke-dasharray")).toBe("40 100");
-  });
-
-  it("keeps the unavailable provider visible without a quota arc", async () => {
+  it("keeps the unavailable account visible without inventing a percentage", async () => {
     await renderUsage([], "error");
-    const button = page.getByRole("button", {
-      name: "Codex usage: Unavailable. Open usage settings",
-    });
-    await expect.element(button).toBeVisible();
-    expect(button.element().querySelectorAll("circle")).toHaveLength(1);
-    expect(button.element().querySelectorAll("circle[stroke-dasharray]")).toHaveLength(0);
+    await expect
+      .element(
+        page.getByRole("button", {
+          name: "Codex usage: 5h unavailable. Open usage settings",
+          exact: true,
+        }),
+      )
+      .toHaveTextContent("—");
   });
 });

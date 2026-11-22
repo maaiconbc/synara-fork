@@ -29,7 +29,7 @@ import {
   RAIL_MORE_GLYPHS,
   type AppRailItem,
 } from "./AppRail";
-import { AppRailUsage } from "./AppRailUsage";
+import { TopNavUsage } from "./TopNavUsage";
 import { DesktopUpdateRailButton } from "./DesktopUpdateRailButton";
 import { SidebarIconButton } from "./SidebarIconButton";
 
@@ -111,6 +111,18 @@ function RailFixture({
   const shortcutCount = (flavor === "beta" ? 1 : 3) + extraShortcuts;
   return (
     <QueryClientProvider client={client}>
+      <div
+        style={{
+          position: "fixed",
+          top: 0,
+          right: 0,
+          height: 44,
+          display: "flex",
+          alignItems: "center",
+        }}
+      >
+        <TopNavUsage onOpenUsageSettings={vi.fn()} />
+      </div>
       <div style={{ position: "fixed", top: 44, bottom: 0, left: 0, display: "flex" }}>
         <AppRail
           items={ids.map(item)}
@@ -130,7 +142,6 @@ function RailFixture({
           bottomItems={[item("settings")]}
           bottomSlot={
             <>
-              <AppRailUsage onOpenUsageSettings={vi.fn()} />
               <SidebarIconButton
                 icon={CircleQuestionIcon}
                 label="Help"
@@ -167,6 +178,12 @@ describe("desktop update rail control", () => {
       try {
         await expect.element(page.getByRole("button", { name: /^Codex usage:/ })).toBeVisible();
         await expect.element(page.getByRole("button", { name: /^Claude usage:/ })).toBeVisible();
+        expect(
+          page
+            .getByRole("button", { name: /^Codex usage:/ })
+            .element()
+            .getBoundingClientRect().bottom,
+        ).toBeLessThanOrEqual(44);
         const settingsButton = page
           .getByRole("button", { name: "Settings", exact: true })
           .element();
@@ -178,7 +195,7 @@ describe("desktop update rail control", () => {
         expect(after).toBeLessThanOrEqual(620);
         const rail = page.getByRole("navigation", { name: "Primary" }).element();
         const bottomFirst = page
-          .getByRole("button", { name: /^Codex usage:/ })
+          .getByRole("button", { name: "Help", exact: true })
           .element()
           .getBoundingClientRect();
         const more = page.getByRole("button", { name: "More", exact: true }).element();

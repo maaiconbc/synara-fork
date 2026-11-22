@@ -684,28 +684,48 @@ describe("composerDraftStore pull request context cards", () => {
     expect(useComposerDraftStore.getState().draftsByThreadId[threadId]).toBeUndefined();
   });
 
-  it("persists and hydrates cards", () => {
-    useComposerDraftStore.getState().addPullRequestContext(threadId, card);
-    const persistApi = useComposerDraftStore.persist as unknown as {
-      getOptions: () => {
-        merge: (
-          persistedState: unknown,
-          currentState: ReturnType<typeof useComposerDraftStore.getState>,
-        ) => ReturnType<typeof useComposerDraftStore.getState>;
-      };
-    };
-    const persistedState = partializeComposerDraftStoreState(
-      useComposerDraftStore.getState(),
-    ) as unknown as {
-      draftsByThreadId?: Record<string, { pullRequestContexts?: unknown }>;
-    };
-    expect(persistedState.draftsByThreadId?.[threadId]?.pullRequestContexts).toEqual([card]);
-
-    const mergedState = persistApi
-      .getOptions()
-      .merge(persistedState, useComposerDraftStore.getInitialState());
-    expect(mergedState.draftsByThreadId[threadId]?.pullRequestContexts).toEqual([card]);
+  it("keeps individual comments beside the bulk review and refreshes only the same comment", () => {
+    const store = useComposerDraftStore.getState();
+    const bulk = { ...card, scope: "comments" as const, text: "All review comments" };
+    const first = { ...bulk, id: "selected-1", commentId: "comment-1", text: "First finding" };
+    const second = { ...bulk, id: "selected-2", commentId: "comment-2", text: "Second finding" };
+    store.addPullRequestContext(threadId, bulk);
+    store.addPullRequestContext(threadId, first);
+    store.addPullRequestContext(threadId, second);
+    store.addPullRequestContext(threadId, { ...first, id: "refreshed-1", text: "Updated finding" });
+    expect(
+      useComposerDraftStore.getState().draftsByThreadId[threadId]?.pullRequestContexts,
+    ).toEqual([bulk, second, { ...first, id: "refreshed-1", text: "Updated finding" }]);
   });
+
+  it.each([undefined, "comment-1"])(
+    "persists and hydrates cards with comment id %s",
+    (commentId) => {
+      const persistedCard = commentId ? { ...card, scope: "comments" as const, commentId } : card;
+      useComposerDraftStore.getState().addPullRequestContext(threadId, persistedCard);
+      const persistApi = useComposerDraftStore.persist as unknown as {
+        getOptions: () => {
+          merge: (
+            persistedState: unknown,
+            currentState: ReturnType<typeof useComposerDraftStore.getState>,
+          ) => ReturnType<typeof useComposerDraftStore.getState>;
+        };
+      };
+      const persistedState = partializeComposerDraftStoreState(
+        useComposerDraftStore.getState(),
+      ) as unknown as {
+        draftsByThreadId?: Record<string, { pullRequestContexts?: unknown }>;
+      };
+      expect(persistedState.draftsByThreadId?.[threadId]?.pullRequestContexts).toEqual([
+        persistedCard,
+      ]);
+
+      const mergedState = persistApi
+        .getOptions()
+        .merge(persistedState, useComposerDraftStore.getInitialState());
+      expect(mergedState.draftsByThreadId[threadId]?.pullRequestContexts).toEqual([persistedCard]);
+    },
+  );
 });
 
 describe("composerDraftStore copyTransferableComposerState", () => {

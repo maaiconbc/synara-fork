@@ -2056,7 +2056,7 @@ export const createComposerDraftStoreState =
       }
       set((state) => {
         const existing = state.draftsByThreadId[threadId] ?? createEmptyThreadDraft();
-        // Same PR + scope replaces the older card in place so a re-click refreshes the
+        // Same PR + scope + selected comment replaces the older card so a re-click refreshes the
         // snapshot instead of stacking duplicate bubbles.
         const dedupKey = pullRequestContextDedupKey(normalized);
         const kept = existing.pullRequestContexts.filter(
